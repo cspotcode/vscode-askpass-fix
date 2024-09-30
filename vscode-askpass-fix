@@ -3,6 +3,7 @@
 __dirname="$(CDPATH= cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 function trace() {
+    true # bash doesn't like empty function bodies
     # echo "$@" >> "$__dirname/trace.txt"
 }
 trace "start: $@"
