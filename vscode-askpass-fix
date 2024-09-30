@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+__dirname="$(CDPATH= cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+lockfile="$__dirname/.vscode-git-askpass-lock"
+statefile="$__dirname/.vscode-git-askpass-state"
+touch "$lockfile"
+[[ -f "$statefile" ]] || touch "$statefile"
+
+exec 200>"$lockfile"
+
+acquire() {
+    flock -s -w 60 200 || exit 1
+}
+
+release() {
+    flock -u 200
+}
+
+# TEst if "$1" starts with the word Username or PAssword
+if [[ "$1" =~ ^Username ]]; then
+    expected="cache-empty"
+    write="password-avail"
+else
+    expected="password-avail"
+    write="cache-empty"
+fi
+
+while true ; do
+    acquire
+    # If statefile mtime is older than 2s, proceed; avoid things being locked indefinitely
+    if [[ $(stat -c %Y "$statefile") -lt $(($(date +%s)-2)) ]] ; then
+        break
+    fi
+    if [[ "$(cat $statefile)" = "$expected" ]] ; then
+        break
+    fi
+    release
+    sleep 0.2
+done
+
+"$VSCODE_GIT_ASKPASS" "$@"
+exit=$?
+
+echo "$write" > "$statefile"
+release
+
+exit $?
