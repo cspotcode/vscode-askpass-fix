@@ -2,47 +2,67 @@
 
 __dirname="$(CDPATH= cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+function trace() {
+    # echo "$@" >> "$__dirname/trace.txt"
+}
+trace "start: $@"
+
 lockfile="$__dirname/.vscode-git-askpass-lock"
 statefile="$__dirname/.vscode-git-askpass-state"
-touch "$lockfile"
-[[ -f "$statefile" ]] || touch "$statefile"
+[[ -f "$lockfile" ]] || touch "$lockfile"
+[[ -f "$statefile" ]] || {
+    trace "Missing statefile; creating it (Request='$@')"
+    echo "cache-empty" > "$statefile"
+}
 
 exec 200>"$lockfile"
 
 acquire() {
-    flock -s -w 60 200 || exit 1
+    flock -x -w 60 200 || exit 1
 }
 
 release() {
     flock -u 200
 }
 
-# TEst if "$1" starts with the word Username or PAssword
+# Is this username or password prompt?
 if [[ "$1" =~ ^Username ]]; then
+    prompt=username
     expected="cache-empty"
     write="password-avail"
 else
+    prompt=password
     expected="password-avail"
     write="cache-empty"
 fi
+trace "prompt=$prompt: expected=$expected write=$write"
 
 while true ; do
     acquire
-    # If statefile mtime is older than 2s, proceed; avoid things being locked indefinitely
-    if [[ $(stat -c %Y "$statefile") -lt $(($(date +%s)-2)) ]] ; then
+    # If username prompt and statefile mtime is older than age seconds, proceed; avoid things being locked indefinitely
+    age=10
+    if [[ "$prompt" = "username" ]] && [[ $(stat -c %Y "$statefile") -lt $(($(date +%s)-$age)) ]] ; then
+        trace "prompt=$prompt: statefile is old; writing state=$expected; breaking"
+        echo "cache-empty" > "$statefile"
         break
     fi
-    if [[ "$(cat $statefile)" = "$expected" ]] ; then
+    state="$(cat $statefile)"
+    if [[ "$state" = "$expected" ]] ; then
+        trace "prompt=$prompt: statefile is expected $state=$expected; breaking"
         break
     fi
+    # trace "prompt=$prompt: state=$state; expected=$expected; sleeping"
     release
     sleep 0.2
 done
 
-"$VSCODE_GIT_ASKPASS" "$@"
-exit=$?
+trace "prompt=$prompt: delegating to vscode"
 
+"$VSCODE_GIT_ASKPASS" "$@"
+exitcode=$?
+
+trace "prompt=$prompt: writing state=$write"
 echo "$write" > "$statefile"
 release
 
-exit $?
+exit $exitcode
